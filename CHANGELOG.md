@@ -1,8 +1,15 @@
 # Changelog for Django Platform Cookbook
 
+## 2.0.0
+
+* Update to apache2 7 cookbook
+* Enable HTTPS checkout of repo
+* Add Appveyor pipeline
+* Cleanup for Supermarket
+
 ## 1.0.1
 
-* Cleanup for Supermarket
+* Updated kitchen to use EC2
 
 ## 1.0.0
 

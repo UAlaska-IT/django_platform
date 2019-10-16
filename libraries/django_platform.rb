@@ -6,13 +6,9 @@ module DjangoPlatform
     TCB = 'django_platform'
 
     def apache_user
-      user =
-        if node['platform_family'] == 'debian'
-          'www-data'
-        else
-          'apache'
-        end
-      return user
+      return 'www-data' if node['platform_family'] == 'debian'
+
+      return 'apache'
     end
 
     def django_user
@@ -24,75 +20,90 @@ module DjangoPlatform
     end
 
     def apache_dev_package_name
-      package =
-        if node['platform_family'] == 'debian'
-          'apache2-dev'
-        else
-          'httpd-devel'
-        end
-      return package
+      return 'apache2-dev' if node['platform_family'] == 'debian'
+
+      'httpd-devel'
+    end
+
+    def source_install?
+      return node[TCB]['python']['install_method'] == 'source'
     end
 
     def python_package_name
-      package =
-        if node['platform_family'] == 'debian'
-          'python3'
-        else
-          'python36'
-        end
-      return package
+      return 'python3'
     end
 
     def python_dev_package_name
-      package =
-        if node['platform_family'] == 'debian'
-          'python3-dev'
-        else
-          'python36-devel'
-        end
-      return package
+      return 'python3-dev' if node['platform_family'] == 'debian'
+
+      return 'python3-devel'
     end
 
     def python_package_prefix
-      package =
-        if node['platform_family'] == 'debian'
-          'python3-'
-        else
-          'python36-'
-        end
-      return package
+      return 'python3-'
     end
 
     def path_to_system_python
-      binary =
-        if node['platform_family'] == 'debian'
-          '/usr/bin/python3'
-        else
-          '/usr/bin/python36'
-        end
-      return binary
+      # Must match python_install
+      return "/opt/python/#{node[TCB]['python']['version_to_install']}/bin/python" if source_install?
+
+      return '/usr/bin/python3'
     end
 
     def path_to_app_repo
       return '/home/django/repo'
     end
 
-    def path_to_venv
+    def path_to_python_env
       return '/home/django/env'
     end
 
+    def path_to_django_python_binary
+      # Must match python_install
+      File.join(path_to_python_env, 'bin/python')
+    end
+
+    def path_to_django_pip_binary
+      # Must match python_install
+      File.join(path_to_python_env, 'bin/pip')
+    end
+
     def path_to_venv_activate
-      return File.join(path_to_venv, 'bin/activate')
+      return File.join(path_to_python_env, 'bin/activate')
     end
 
     def path_to_wsgi_installer
-      return File.join(path_to_venv, 'bin/mod_wsgi-express')
+      return File.join(path_to_python_env, 'bin/mod_wsgi-express')
     end
 
     def path_to_apache_mod_libs
       return '/usr/lib/apache2/modules' if node['platform_family'] == 'debian'
 
       return '/usr/lib64/httpd/modules'
+    end
+
+    def source_python_revision
+      version_array = node[TCB]['python']['version_to_install'].split('.')
+      return "#{version_array[0]}#{version_array[1]}"
+    end
+
+    def package_python_revision
+      # This is going to be a pain to sync as platforms release
+      debian35 = node['platform_version'] == '16.04' || node['platform_version'] == '9'
+      return '35' if node['platform_family'] == 'debian' && debian35
+
+      return '36'
+    end
+
+    def django_python_revision
+      return source_python_revision if source_install?
+
+      return package_python_revision
+    end
+
+    def wsgi_module_name
+      python_rev = django_python_revision
+      return "mod_wsgi-py#{python_rev}.cpython-#{python_rev}m-x86_64-linux-gnu.so"
     end
 
     def all_git_hosts
@@ -102,6 +113,20 @@ module DjangoPlatform
         hosts = hosts.merge(host => '')
       end
       return hosts
+    end
+
+    def git_repo_host
+      return "#{node[TCB]['app_repo']['git_protocol']}#{node[TCB]['app_repo']['git_host']}"
+    end
+
+    def git_repo_delimiter
+      return ':' if node[TCB]['app_repo']['git_protocol'].match?(/git/)
+
+      return '/'
+    end
+
+    def git_repo_url
+      "#{git_repo_host}#{git_repo_delimiter}#{node[TCB]['app_repo']['git_user']}/#{node[TCB]['app_repo']['git_repo']}"
     end
 
     def rel_path_to_site_directory
@@ -140,6 +165,11 @@ module DjangoPlatform
       return File.join(path_to_app_repo, rel_path_to_sqlite_db)
     end
 
+    def sqlite_db?
+      db_attr = node[TCB]['app_repo']['rel_path_to_sqlite_db']
+      return db_attr && !db_attr.empty?
+    end
+
     def rel_path_to_manage_py
       dir = rel_path_to_manage_directory
       return 'manage.py' unless dir && !dir.empty?
@@ -164,8 +194,6 @@ module DjangoPlatform
     end
 
     def vault_secret(bag, item, key)
-      validate_secret_attributes(bag, item, key)
-
       # Will raise 404 error if not found
       item = chef_vault_item(
         bag,
@@ -177,6 +205,12 @@ module DjangoPlatform
       raise 'Unable to retrieve item key' if secret.nil?
 
       return secret
+    end
+
+    def vault_secret_key(bag, item, key)
+      validate_secret_attributes(bag, item, key)
+
+      return vault_secret(bag, item, key)
     end
 
     def vault_secret_hash(object)

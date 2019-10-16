@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+package 'git'
+
 tcb = 'django_platform'
 
 app_repo = node[tcb]['app_repo']
@@ -26,17 +28,15 @@ all_git_hosts.each do |host, _|
   end
 end
 
-repo_url = "git@#{app_repo['git_host']}:#{app_repo['git_user']}/#{app_repo['git_repo']}"
-
 git path_to_app_repo do
   user django_user
   group django_group
-  repository repo_url
+  repository git_repo_url
   # enable_checkout false # use checkout_branch
   revision app_repo['git_revision']
   enable_submodules true
   environment app_repo['environment']
-  notifies :restart, "service[#{apache_service}]", :delayed
+  notifies :restart, 'service[apache2]', :delayed
 end
 
 ruby_block 'Git Repo Synced' do
@@ -56,7 +56,7 @@ unless app_repo['rel_path_to_pip_requirements'].nil?
     path File.join(path_to_app_repo, app_repo['rel_path_to_pip_requirements'])
     user django_user
     group django_group
-    virtualenv path_to_venv
+    python path_to_django_python_binary
     only_if { node[tcb]['app_repo']['git_repo_updated'] }
   end
 end
@@ -68,7 +68,7 @@ end
 python_execute 'Migrate App Data' do
   command manage_command('migrate')
   cwd path_to_app_repo
-  virtualenv path_to_venv
+  python path_to_django_python_binary
   user django_user
   group django_group
   only_if { node[tcb]['app_repo']['git_repo_updated'] }
@@ -77,7 +77,7 @@ end
 python_execute 'Collect Static' do
   command manage_command('collectstatic --noinput')
   cwd path_to_app_repo
-  virtualenv path_to_venv
+  python path_to_django_python_binary
   user django_user
   group django_group
   only_if { node[tcb]['app_repo']['git_repo_updated'] }
@@ -89,7 +89,7 @@ app_repo['additional_management_commands'].each do |code|
   python_execute "Manage Command: #{cmd}" do
     command cmd
     cwd path_to_app_repo
-    virtualenv path_to_venv
+    python path_to_django_python_binary
     user django_user
     group django_group
     only_if { node[tcb]['app_repo']['git_repo_updated'] }
@@ -112,11 +112,11 @@ directory path_to_app_repo do
   user django_user
   group django_group
   mode '0770'
-  only_if { app_repo['rel_path_to_sqlite_db'] }
+  only_if { sqlite_db? }
 end
 file path_to_sqlite_db do
   user django_user
   group django_group
   mode '0660'
-  only_if { app_repo['rel_path_to_sqlite_db'] }
+  only_if { sqlite_db? }
 end

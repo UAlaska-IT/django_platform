@@ -2,6 +2,7 @@
 
 [![License](https://img.shields.io/github/license/ualaska-it/django_platform.svg)](https://github.com/ualaska-it/django_platform)
 [![GitHub Tag](https://img.shields.io/github/tag/ualaska-it/django_platform.svg)](https://github.com/ualaska-it/django_platform)
+[![Build status](https://ci.appveyor.com/api/projects/status/7sjr3vr50j5e8ymy/branch/master?svg=true)](https://ci.appveyor.com/project/UAlaska/django-platform/branch/master)
 
 __Maintainer: OIT Systems Engineering__ (<ua-oit-se@alaska.edu>)
 
@@ -11,6 +12,11 @@ This is a baseline cookbook that installs/configures a platform consisting of Py
 It then deploys a Django application from a git repository.
 
 Django is run on an Apache instance that is configured using [http_platform](https://github.com/ualaska-it/http_platform).
+
+It is optional to install OpenSSL, SQLite, and Python from packages or sources, see `node['django_platform']['python']['install_method']`.
+Build times for install from source can be long, especially for Python 3.7.
+The source build after changing Python version can take more than a half hour.
+On burstable instance types, CPU credits tend to deplete on small instances (smaller than an EC2 t3.medium).
 
 ## Requirements
 
@@ -30,12 +36,19 @@ Supported Platform Families:
 Platforms validated via Test Kitchen:
 
 * Ubuntu
+* Debian
 * CentOS
+* Oracle
 
 ### Dependencies
 
 This cookbook does not constrain its dependencies because it is intended as a utility library.
 It should ultimately be used within a wrapper cookbook.
+
+Note:
+
+Version 2 of this cookbook requires [apache2 cookbook](https://github.com/sous-chefs/apache2) >= 6.0.
+To support older apache2 versions, use version 1 of this cookbook.
 
 ## Resources
 
@@ -61,7 +74,7 @@ Clients should merge this attribute rather than overwrite because mod alias is r
 In addition, mod_wsgi is installed by Pip.
 
 * `node['http_platform']['apache']['paths_to_additional_configs']`.
-Defaults to `node['http_platform']['apache']['paths_to_additional_configs'].merge('conf.d/django-host.conf' => '')`.
+Defaults to `node['http_platform']['apache']['paths_to_additional_configs'].merge('conf-available/django-host.conf' => '')`.
 The list of config files to enable on the virtual host,
 As with the default from the [http_platform](https://github.com/ualaska-it/http_platform), this should be merged instead of overridden unless a custom server configuration is desired.
 
@@ -72,13 +85,22 @@ Django forms use a CSRF token to mitigate cross-site forgery attacks.
 This requires the referrer to be included in the header.
 This setting provides the referrer only for HTTPS traffic to mitigate other vulnerability; HTTP is redirected to HTTPS by the default [http_platform](https://github.com/ualaska-it/http_platform) configuration.
 
+On RHEL-based distros, SE Linux must be set to permissive to perform some actions.
+To do this the [selinux cookbook](https://github.com/chef-cookbooks/selinux) is used.
+The state for SE Linux is determined by `node['selinux']['state']` and is set to `'permissive'` by default in this cookbook.
+
 ### App
 
 __Git checkout__
 
 This cookbook assumes the django application is contained in a git repo.
-Due to limitations of the built-in [git resource](https://docs.chef.io/resource_git.html), only SSH access is supported.
-Submodules will be checked out recursively, and these can use HTTP.
+Both SSH and HTTPS access are supported.
+Submodules will be checked out recursively, and these can also use SSH or HTTPS.
+
+* `node['django_platform']['app_repo']['git_protocol']`.
+Defaults to `'git@'`.
+The protocol to use to fetch the git repo that contains the Django application.
+Valid values are 'git@' and 'https://'.
 
 * `node['django_platform']['app_repo']['git_host']`.
 Defaults to `'github.com'`.
@@ -95,7 +117,7 @@ The name of the repo within the git organization; must be set or an exception is
 * `node['django_platform']['app_repo']['git_revision']`.
 Defaults to `'master'`.
 The branch, tag, or commit to check out.
-This is often changed during development and testing, e.g. 'staging', 'deploy'.
+This is often changed during development and testing, e.g. to 'staging', 'deploy'.
 
 * `node['django_platform']['app_repo']['git_submodule_hosts']`.
 Defaults to `['github.com']`.
@@ -144,15 +166,15 @@ The checkout workflow is as follows.
 
 * Run pre-checkout recipes, see `node['django_platform']['app_repo']['additional_recipes_before_checkout']`
 * Synchronize the git repo
-* Run pre-install recipes, see `node['django_platform']['app_repo']['additional_recipes_before_checkout']`
+* Run pre-install recipes, see `node['django_platform']['app_repo']['additional_recipes_before_install']`
 * If the git repo changed
   * Install all entries in `requirements.txt`, if the cookbook is configured to do so
-* Run pre-migrate recipes, `node['django_platform']['app_repo']['additional_recipes_before_install']`
+* Run pre-migrate recipes, `node['django_platform']['app_repo']['additional_recipes_before_migration']`
 * If the git repo changed
   * Migrate the database `manage.py migrate`
   * Collect static files `manage.py collectstatic`, if the Django app is configured for it
   * Run a list of custom management commands, see `node['django_platform']['app_repo']['additional_management_commands']`
-  * Run a list of custom bash scripts, with the python environment for Django activated, `node['django_platform']['app_repo']['additional_shell_scripts']`
+  * Run a list of custom bash scripts, with the Python environment for Django activated, `node['django_platform']['app_repo']['additional_shell_scripts']`
 
 Pre-checkout, pre-install, and pre-migrate recipes are run _unconditionally_.
 A flag is provided to indicate if the repo updated.
@@ -192,12 +214,44 @@ This attribute is included to support limited cases where an application can be 
 
 ### Python
 
-The version of Pip is fixed using a poise-python attribute.
+RHEL and Django approaches don't align well.
+The latest 2.2 LTS release of Django requires Python 3.5 and SQLite 3.8 or higher.
+RHEL + EPEL provides Python 3.6, but it is compiled with an old SQLite 3.7.
+For comparison, Ubuntu 16 comes with only Python 3.5, but it is compiled with SQLite 3.11.
 
-* `default['poise-python']['options']['pip_version']`.
-Defaults to '18.0'.
-The version of Pip to install; Set to `true` for the latest.
-As of poise-python v1.7.0, Pip 18.1 breaks the install, so this version should not be updated until poise-python is.
+Where possible, it is advisable to use system packages because they are better supported.
+However, running newer Django versions on older distros can require installing custom libraries.
+This cookbook can be used to build a custom python install.
+The install method is controlled by a single switch.
+
+* `node['django_platform']['python']['install_method']`.
+Defaults to 'package'.
+The method used to install Python and dependencies.
+Allowable values are 'package' and 'source'.
+
+When source install is chosen, the attributes below control the versions of Python and dependencies to install.
+The attributes below are ignored for package install.
+
+* `node['django_platform']['openssl']['version_to_install']`.
+Defaults to `nil`,
+The version of OpenSSL to install.
+If nil, the default version for [openssl_install](https://github.com/UAlaska-IT/openssl_install) will be used.
+
+* `node['django_platform']['sqlite']['version_to_install']`.
+Defaults to `nil`,
+The version of SQLite to install.
+If nil, the default version for [sqlite_install](https://github.com/UAlaska-IT/sqlite_install) will be used.
+
+* `node['django_platform']['python']['version_to_install']`.
+Defaults to `3.7.4`,
+The version of Python to install.
+
+Note:
+
+* Compile times for a full Python stack can be long, so the first run will take a while.
+* Django support for Python and SQLite can be found [here](https://www.djangoproject.com/download/#supported-versions).
+
+The Pip packages to install are set using a single attribute.
 
 * `node['django_platform']['python']['packages_to_install']`.
 Defaults to
@@ -209,11 +263,12 @@ Defaults to
   setuptools: '',
   # Pip install is used because CentOS/EPEL does not supply a package for WSGI that supports Python 3
   mod_wsgi: '',
+  # This is unpinned; 2.2 is the latest LTS release
   Django: ''
 }
 ```
 A Hash of package name to version.
-If version is empty, the latest version will be installed
+If version is empty, the latest version will be installed.
 Clients should merge this attribute rather than overwrite because mod_wsgi and Django are required for the server to function.
 
 ### User
@@ -223,25 +278,27 @@ Defaults to `true`.
 If false, the django user will be configured with a shell, mostly for development and debugging.
 
 # SSH private key for git user
+
+If the app repo will be fetched using SSH (`node['django_platform']['app_repo']['git_protocol']`), the attributes relating to the SSH private key must be set or an exception is raised.
+
 * `node['django_platform']['git_ssh_key']['vault_data_bag']`.
 Defaults to `nil`.
-The name of the vault data bag from which to fetch the SSH key.
-Must be set or an exception is raised.
+The name of the vault data bag (directory) from which to fetch the SSH key.
 
 * `node['django_platform']['git_ssh_key']['vault_bag_item']`.
 Defaults to `nil`.
-The item inside the data bag (json file).
-Must be set or an exception is raised.
+The item (json file) inside the data bag.
 
 * `node['django_platform']['git_ssh_key']['vault_item_key']`.
 Defaults to `nil`.
 The hash key for referencing the SSH key within the json object.
-Must be set or an exception is raised.
 
 ## Examples
 
 This is an application cookbook; no custom resources are provided.
 See recipes and attributes for details of what this cookbook does.
+
+Cookbooks for two sample deployments are included in test/fixtures/cookbooks.
 
 ## Development
 

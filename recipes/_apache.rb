@@ -6,11 +6,19 @@ include_recipe 'http_platform::default'
 # This is used for pip install of wsgi
 package apache_dev_package_name
 
+wsgi_socket_prefix =
+  if platform_family?('debian')
+    '/var/run/apache2/wsgi'
+  else
+    '/var/run/wsgi'
+  end
+
 var_map = {
   path_to_manage_dir: File.join(path_to_app_repo, rel_path_to_manage_directory),
   path_to_static_directory: File.join(path_to_app_repo, rel_path_to_static_directory),
-  path_to_venv: path_to_venv,
-  path_to_wsgi_py: File.join(path_to_app_repo, rel_path_to_site_directory, 'wsgi.py')
+  path_to_python_env: path_to_python_env,
+  path_to_wsgi_py: File.join(path_to_app_repo, rel_path_to_site_directory, 'wsgi.py'),
+  wsgi_socket_prefix: wsgi_socket_prefix
 }
 
 template 'Django Host' do
@@ -20,7 +28,7 @@ template 'Django Host' do
   owner 'root'
   group 'root'
   mode '0440'
-  notifies :restart, "service[#{apache_service}]", :delayed
+  notifies :restart, 'service[apache2]', :delayed
 end
 
 django_conf = File.join(conf_available_directory, 'django.conf')
@@ -33,7 +41,7 @@ template 'Django Conf' do
   owner 'root'
   group 'root'
   mode '0440'
-  notifies :restart, "service[#{apache_service}]", :delayed
+  notifies :restart, 'service[apache2]', :delayed
 end
 
 link 'Link for Django Conf' do
@@ -41,5 +49,5 @@ link 'Link for Django Conf' do
   to django_conf
   owner 'root'
   group 'root'
-  notifies :restart, "service[#{apache_service}]", :delayed
+  notifies :restart, 'service[apache2]', :delayed
 end

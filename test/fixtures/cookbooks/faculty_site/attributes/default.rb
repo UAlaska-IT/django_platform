@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
-default['http_platform']['admin_email'] = 'ua-oit-se@alaska.edu'
+default['nix_baseline']['hostname'] = 'mcs'
+default['nix_baseline']['domain'] = 'calsev.com'
+
+default['http_platform']['admin_email'] = 'webmaster@calsev.com'
+default['http_platform']['cert']['organization'] = 'CalSev'
+default['http_platform']['cert']['org_unit'] = 'MCS'
 
 default['django_platform']['app_repo']['rel_path_to_manage_directory'] = 'app'
 default['django_platform']['app_repo']['rel_path_to_site_directory'] = 'app/faculty_site'

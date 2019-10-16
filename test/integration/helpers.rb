@@ -41,6 +41,12 @@ def apache_shell(node)
   return shell
 end
 
+def apache_service(node)
+  return 'apache2' if node['platform_family'] == 'debian'
+
+  return 'httpd'
+end
+
 def path_to_base_conf_dir(node)
   return '/etc/apache2' if node['platform_family'] == 'debian'
 
@@ -52,7 +58,7 @@ def path_to_conf_directory(node)
 end
 
 def path_to_host_directory(node)
-  return File.join(path_to_base_conf_dir(node), 'conf.d')
+  return File.join(path_to_base_conf_dir(node), 'conf-available')
 end
 
 def path_to_http_host(node)
@@ -103,38 +109,55 @@ def postgresql_service(node)
   return service
 end
 
+def path_to_openssl
+  return '/opt/openssl/1.1.1d/bin/openssl'
+end
+
+def path_to_sqlite
+  return '/opt/sqlite/3300000/bin/sqlite3'
+end
+
 def python_version(node)
-  return '3.5' if node['platform_family'] == 'debian' && node['platform_version'] == '16.04'
+  debian35 = node['platform_version'] == '16.04' || node['platform_version'] == '9'
+  return '3.5' if node['platform_family'] == 'debian' && debian35
 
   return '3.6'
 end
 
-def python_package(node)
-  if node['platform_family'] == 'debian'
-    package = 'python3'
-  elsif node['platform_family'] == 'rhel'
-    package = 'python36'
-  else
-    raise "Platform family not recognized: #{node['platform_family']}"
-  end
-  return package
+def python_package(_node)
+  return 'python3'
 end
 
-def python_package_prefix(node)
-  if node['platform_family'] == 'debian'
-    package = 'python3-'
-  elsif node['platform_family'] == 'rhel'
-    package = 'python36-'
-  else
-    raise "Platform family not recognized: #{node['platform_family']}"
-  end
-  return package
+def python_package_prefix(_node)
+  return 'python3-'
 end
 
-def path_to_venv
+def python_dev_package(node)
+  return 'python3-dev' if node['platform_family'] == 'debian'
+
+  return 'python3-devel'
+end
+
+def path_to_python_env
   return '/home/django/env'
 end
 
+def path_to_python
+  return File.join(path_to_python_env, 'bin/python')
+end
+
 def path_to_pip
-  return File.join(path_to_venv, 'bin/pip')
+  return File.join(path_to_python_env, 'bin/pip')
+end
+
+def wsgi_package_name(node)
+  return 'mod-wsgi' if node['platform'] == 'ubuntu'
+
+  return 'mod_wsgi'
+end
+
+def django_version(node)
+  return '2.2' if node['platform_family'] == 'debian' || python_version(node).to_f > 3.6
+
+  return '2.1'
 end
